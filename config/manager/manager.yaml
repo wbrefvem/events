@@ -29,6 +29,23 @@ spec:
         - --enable-leader-election
         image: controller:latest
         name: manager
+        env:
+        - name: SCM_PROVIDER
+          value: bitbucket-server
+        - name: SCM_URL
+          value: https://scm.hill-rom.com
+        - name: SCM_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: bitbucket-creds
+              key: username
+        - name: SCM_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: bitbucket-creds
+              key: password
+        - name: TEKTON_DASHBOARD_URL
+          value: https://tekton.devops-infra-dev.hrdev.io
         resources:
           limits:
             cpu: 100m

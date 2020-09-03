@@ -27,9 +27,9 @@ rules:
   - patch
   - update
 - apiGroups:
-  - ""
+  - tekton.dev
   resources:
-  - secrets
+  - pipelineruns
   verbs:
   - create
   - delete
@@ -39,9 +39,9 @@ rules:
   - update
   - watch
 - apiGroups:
-  - ""
+  - tekton.dev
   resources:
-  - secrets/status
+  - pipelineruns/status
   verbs:
   - get
   - patch

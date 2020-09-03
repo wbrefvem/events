@@ -18,9 +18,12 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"net/http"
 	"os"
 	"time"
 
+	tektonv1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -30,6 +33,7 @@ import (
 
 	"github.com/drone/go-scm/scm"
 	"github.com/drone/go-scm/scm/driver/stash"
+	"github.com/drone/go-scm/scm/transport"
 	"github.com/trysterodev/events/controllers"
 	// +kubebuilder:scaffold:imports
 )
@@ -47,10 +51,27 @@ func init() {
 }
 
 func getScmClient() (*scm.Client, error) {
-	switch provider := os.Getenv("SCM_PRODIVDER"); provider {
+	switch provider := os.Getenv("SCM_PROVIDER"); provider {
 	case "bitbucket-server":
 		url := os.Getenv("SCM_URL")
-		return stash.New(url)
+		bitbucketServerClient, err := stash.New(url)
+		if err != nil {
+			return nil, err
+		}
+		scmUsername := os.Getenv("SCM_USERNAME")
+		scmPassword := os.Getenv("SCM_PASSWORD")
+
+		if scmUsername == "" || scmPassword == "" {
+			return nil, fmt.Errorf("SCM credentials not found")
+		}
+
+		bitbucketServerClient.Client = &http.Client{
+			Transport: &transport.BasicAuth{
+				Username: scmUsername,
+				Password: scmPassword,
+			},
+		}
+		return bitbucketServerClient, nil
 	default:
 		return nil, scm.ErrNotSupported
 	}
@@ -66,6 +87,11 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	err := tektonv1beta1.AddToScheme(scheme)
+	if err != nil {
+		setupLog.Error(err, "unable to add Tekton types to scheme")
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:             scheme,

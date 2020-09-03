@@ -24,9 +24,10 @@ import (
 	"time"
 
 	"github.com/drone/go-scm/scm"
-	"github.com/drone/go-scm/scm/transport"
 	"github.com/go-logr/logr"
 	tektonv1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
+
+	//pipelineclientset "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -52,8 +53,8 @@ var statusMap = map[string]scm.State{
 
 // +kubebuilder:rbac:groups=core,resources=events,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=events/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=core,resources=secrets/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=tekton.dev,resources=pipelineruns,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=tekton.dev,resources=pipelineruns/status,verbs=get;update;patch
 
 // Reconcile process Tekton events and updates a Bitbucket Server build status
 func (r *EventReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
@@ -62,8 +63,10 @@ func (r *EventReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	event := &corev1.Event{}
 	err := r.Client.Get(ctx, req.NamespacedName, event)
+	// If the event doesn't exist, don't requeue it
 	if err != nil {
-		return ctrl.Result{}, err
+		logger.Info(fmt.Sprintf("error getting event: %s", err))
+		return ctrl.Result{}, nil
 	}
 
 	if event.InvolvedObject.Kind == "PipelineRun" {
@@ -116,24 +119,10 @@ func (r *EventReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			return ctrl.Result{}, nil
 		}
 
-		scmUsername := os.Getenv("SCM_USERNAME")
-		scmPassword := os.Getenv("SCM_PASSWORD")
-
-		if scmUsername == "" || scmPassword == "" {
-			return ctrl.Result{}, fmt.Errorf("SCM credentials not found")
-		}
-
-		r.ScmClient.Client.Transport = &transport.BasicAuth{
-			Username: scmUsername,
-			Password: scmPassword,
-		}
-
 		logger.Info(fmt.Sprintf("Creating new build status for %s/%s", project, repo))
 
 		nameKey := fmt.Sprintf("PR-%s-%s", prID, event.InvolvedObject.Name)
-
 		tektonDashboardURL := os.Getenv("TEKTON_DASHBOARD_URL")
-
 		status := &scm.StatusInput{
 			State:  statusMap[event.Reason],
 			Label:  nameKey,
@@ -149,6 +138,9 @@ func (r *EventReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 		// Annotate the Event so we don't process it twice.
 		annotations := event.GetAnnotations()
+		if len(annotations) == 0 {
+			annotations = make(map[string]string)
+		}
 		annotations["events.trystero.dev/processed"] = "true"
 		event.SetAnnotations(annotations)
 		err = r.Client.Update(ctx, event)
@@ -159,6 +151,9 @@ func (r *EventReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		// Annotate the PipelineRun with the timestamp of the last Event we processed for it.
 		// This will ensure that we don't update a commit with a stale status.
 		annotations = pipelineRun.GetAnnotations()
+		if len(annotations) == 0 {
+			annotations = make(map[string]string)
+		}
 		annotations["events.trystero.dev/last-event-timestamp"] = event.LastTimestamp.Format(time.RFC3339)
 		pipelineRun.SetAnnotations(annotations)
 		err = r.Client.Update(ctx, pipelineRun)
